@@ -198,10 +198,14 @@ async function detectTaskMasterFolder(projectPath) {
 
 // Cache for extracted project directories
 const projectDirectoryCache = new Map();
+let projectsSnapshotCache = null;
+let projectsSnapshotPromise = null;
 
 // Clear cache when needed (called when project files change)
 function clearProjectDirectoryCache() {
   projectDirectoryCache.clear();
+  projectsSnapshotCache = null;
+  projectsSnapshotPromise = null;
 }
 
 // Load project configuration file
@@ -381,7 +385,7 @@ async function extractProjectDirectory(projectName) {
   }
 }
 
-async function getProjects(progressCallback = null) {
+async function buildProjectsSnapshot(progressCallback = null) {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const config = await loadProjectConfig();
   const projects = [];
@@ -639,6 +643,25 @@ async function getProjects(progressCallback = null) {
   }
 
   return projects;
+}
+
+async function getProjects(progressCallback = null) {
+  if (projectsSnapshotCache) {
+    return projectsSnapshotCache;
+  }
+
+  if (!projectsSnapshotPromise) {
+    projectsSnapshotPromise = buildProjectsSnapshot(progressCallback)
+      .then((projects) => {
+        projectsSnapshotCache = projects;
+        return projects;
+      })
+      .finally(() => {
+        projectsSnapshotPromise = null;
+      });
+  }
+
+  return projectsSnapshotPromise;
 }
 
 async function getSessions(projectName, limit = 5, offset = 0) {
@@ -1400,6 +1423,14 @@ function normalizeComparablePath(inputPath) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+let codexSessionsIndexCache = null;
+let codexSessionsIndexPromise = null;
+
+function clearCodexSessionsIndexCache() {
+  codexSessionsIndexCache = null;
+  codexSessionsIndexPromise = null;
+}
+
 async function findCodexJsonlFiles(dir) {
   const files = [];
 
@@ -1472,6 +1503,25 @@ async function buildCodexSessionsIndex() {
   return sessionsByProject;
 }
 
+async function getCachedCodexSessionsIndex() {
+  if (codexSessionsIndexCache) {
+    return codexSessionsIndexCache;
+  }
+
+  if (!codexSessionsIndexPromise) {
+    codexSessionsIndexPromise = buildCodexSessionsIndex()
+      .then((sessionsByProject) => {
+        codexSessionsIndexCache = sessionsByProject;
+        return sessionsByProject;
+      })
+      .finally(() => {
+        codexSessionsIndexPromise = null;
+      });
+  }
+
+  return codexSessionsIndexPromise;
+}
+
 // Fetch Codex sessions for a given project path
 async function getCodexSessions(projectPath, options = {}) {
   const { limit = 5, indexRef = null } = options;
@@ -1482,10 +1532,10 @@ async function getCodexSessions(projectPath, options = {}) {
     }
 
     if (indexRef && !indexRef.sessionsByProject) {
-      indexRef.sessionsByProject = await buildCodexSessionsIndex();
+      indexRef.sessionsByProject = await getCachedCodexSessionsIndex();
     }
 
-    const sessionsByProject = indexRef?.sessionsByProject || await buildCodexSessionsIndex();
+    const sessionsByProject = indexRef?.sessionsByProject || await getCachedCodexSessionsIndex();
     const sessions = sessionsByProject.get(normalizedProjectPath) || [];
 
     // Return limited sessions for performance (0 = unlimited for deletion)
@@ -2552,6 +2602,7 @@ export {
   saveProjectConfig,
   extractProjectDirectory,
   clearProjectDirectoryCache,
+  clearCodexSessionsIndexCache,
   getCodexSessions,
   getCodexSessionMessages,
   deleteCodexSession,

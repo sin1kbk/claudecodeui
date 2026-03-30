@@ -44,7 +44,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache, searchConversations } from './projects.js';
+import { getProjects, getSessions, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache, clearCodexSessionsIndexCache, searchConversations } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval, getPendingApprovalsForSession, reconnectSessionWriter } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -148,6 +148,9 @@ async function setupProjectsWatcher() {
 
                 // Clear project directory cache when files change
                 clearProjectDirectoryCache();
+                if (provider === 'codex') {
+                    clearCodexSessionsIndexCache();
+                }
 
                 // Get updated projects list
                 const updatedProjects = await getProjects(broadcastProgress);
@@ -2554,6 +2557,12 @@ async function startServer() {
 
             // Start watching the projects folder for changes
             await setupProjectsWatcher();
+
+            // Warm the project snapshot in the background so the first UI load
+            // can reuse the cached result when the process has been idle.
+            getProjects().catch((error) => {
+                console.error('[WARN] Failed to warm project snapshot cache:', error.message);
+            });
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {
