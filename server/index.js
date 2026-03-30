@@ -98,6 +98,7 @@ let projectsWatchers = [];
 let projectsWatcherDebounceTimer = null;
 const connectedClients = new Set();
 let isGetProjectsRunning = false; // Flag to prevent reentrant calls
+const PROJECT_WATCHER_REBUILD_EVENTS = new Set(['add', 'unlink', 'addDir', 'unlinkDir']);
 
 // Broadcast progress to all connected WebSocket clients
 function broadcastProgress(progress) {
@@ -133,6 +134,13 @@ async function setupProjectsWatcher() {
     projectsWatchers = [];
 
     const debouncedUpdate = (eventType, filePath, provider, rootPath) => {
+        // Session transcripts are append-heavy. Rebuilding the full project snapshot
+        // on every content change defeats the cache and makes project loading regress.
+        // We only rebuild when the watched tree topology changes.
+        if (!PROJECT_WATCHER_REBUILD_EVENTS.has(eventType)) {
+            return;
+        }
+
         if (projectsWatcherDebounceTimer) {
             clearTimeout(projectsWatcherDebounceTimer);
         }
